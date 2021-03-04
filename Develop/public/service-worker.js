@@ -3,7 +3,7 @@ const FILES_TO_CACHE = [
     "/db.js",
     "/index.html",
     "/index.js",
-    "/style.css",
+    "/styles.css",
     "/icons/icon-192x192.png",
     "/icons/icon-512x512.png",
 ];
@@ -21,15 +21,11 @@ self.addEventListener("install", function(event) {
     const resourceCache = await caches.open(CACHE_NAME);
     return resourceCache.addAll(FILES_TO_CACHE);
   }
-  // More info: https://developer.mozilla.org/en-US/docs/Web/API/Cache/addAll
 
-  self.skipWaiting(); // Any previous service worker running on this site. Override now!
-  // More info: https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerGlobalScope/skipWaiting
 
-  event.waitUntil(cacheResources()); // Hey browser! Do not stop me. I am adding resources (such as pages and images) to the cache API.
-  // More info: https://developer.mozilla.org/en-US/docs/Web/API/ExtendableEvent/waitUntil
-
-  console.log("Your files were pre-cached successfully!");
+  self.skipWaiting();
+    event.waitUntil(cacheResources());
+    console.log("Your files were pre-cached successfully!");
 });
 
 // activate
@@ -46,55 +42,80 @@ self.addEventListener("activate", function(event) {
         return caches.delete(key);
       }
     });
-    // More info: https://developer.mozilla.org/en-US/docs/Web/API/Cache/delete
   
     return Promise.all(cacheResultPromiseArray);
   }
 
-  event.waitUntil(removeOldCache());  // Hey browser! Do not stop me. I am now deleting old caches from the cache API.
-  // More info: https://developer.mozilla.org/en-US/docs/Web/API/ExtendableEvent/waitUntil
-
-
+  event.waitUntil(removeOldCache());
   self.clients.claim();
-  // More info: https://developer.mozilla.org/en-US/docs/Web/API/Clients/claim
 });
 
 // fetch
+// self.addEventListener("fetch", function(event) {
+//   console.log("fetch", event.request.url);
+//   const handleAPIDataRequest = async (event) => {
+//     console.log("Event log: ", event)
+//     try {
+//       const response = await fetch(event);
+//       console.log("response ", response)
+//       if (response.status === 200) {
+//         console.log(`Adding API request to cache now: ${event}`);
+
+//         const apiCache = await caches.open(DATA_CACHE_NAME);
+//         await apiCache.put(event.request.url, response.clone());
+//         return response;
+//       }
+//     } catch(error) {
+//       console.log(`Network error occurred with API request. Now retrieving it from the cache: ${event}`)
+//       return await caches.match(event.request);
+//     }
+//   }
+  
+//   const handleResourceRequest = async (event) => {
+//     const matchedCache = await caches.match(event.request);
+//     return matchedCache ||  await fetch(event.request);
+//   }
+  
+//   // cache successful requests to the API
+//   if (event.request.url.includes("/api/")) {
+//     event.respondWith(handleAPIDataRequest(event));
+//   } else {
+//     event.respondWith(handleResourceRequest(event));
+//   }
+
+// });
+
 self.addEventListener("fetch", function(event) {
-
-  console.log("fetch", event.request.url);
-
-  const handleAPIDataRequest = async (event) => {
-    try {
-      const response = await fetch(event.request);
-      // If the response was good, clone it and store it in the cache.
-      if (response.status === 200) {
-        console.log(`Adding API request to cache now: ${event.request.url}`);
-
-        const apiCache = await caches.open(DATA_CACHE_NAME);
-        await apiCache.put(event.request.url, response.clone());
-
-        return response;
-      }
-    } catch(error) {
-      // Network request failed, try to get it from the cache.
-      console.log(`Network error occurred with API request. Now retrieving it from the cache: ${event.request.url}`)
-      return await caches.match(event.request);
-    }
-  }
-  
-  const handleResourceRequest = async (event) => {
-    const matchedCache = await caches.match(event.request);
-    return matchedCache ||  await fetch(event.request);
-  }
-  
-  // cache successful requests to the API
+  // cache all get requests to /api routes
   if (event.request.url.includes("/api/")) {
-    event.respondWith(handleAPIDataRequest(event));
-  } else {
-    // if the request is not for the API, serve static assets using "offline-first" approach.
-    // see https://developers.google.com/web/fundamentals/instant-and-offline/offline-cookbook#cache-falling-back-to-network
-    event.respondWith(handleResourceRequest(event));
+    event.respondWith(
+      caches.open(DATA_CACHE_NAME).then(cache => {
+        return fetch(event.request)
+          .then(response => {
+            // If the response was good, clone it and store it in the cache.
+            if (response.status === 200) {
+              cache.put(event.request.url, response.clone());
+            }
+            return response;
+          })
+          .catch(err => {
+            // Network request failed, try to get it from the cache.
+            return cache.match(event.request);
+          });
+      }).catch(err => console.log(err))
+    );
+    return;
   }
-
+  event.respondWith(
+    fetch(event.request).catch(function() {
+      return caches.match(event.request).then(function(response) {
+        if (response) {
+          return response;
+        } else if (event.request.headers.get("accept").includes("text/html")) {
+          // return the cached home page for all requests for html pages
+          return caches.match("/");
+        }
+      });
+    })
+  );
 });
